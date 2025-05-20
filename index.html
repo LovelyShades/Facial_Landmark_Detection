@@ -133,6 +133,13 @@
     <canvas id="canvas"></canvas>
   </div>
 
+  <!-- Mask Controls UI -->
+  <div id="maskControls" style="margin-bottom:1rem;">
+    <input type="file" id="maskUpload" accept="image/*" multiple />
+    <button id="clearMasks">Clear Masks</button>
+    <ul id="maskList" style="list-style:none;padding:0;display:inline-block;"></ul>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
   <script>
@@ -165,6 +172,12 @@
     const deletePracticeSet = document.getElementById('deletePracticeSet');
     const practiceModeToggle = document.getElementById('practiceModeToggle');
     const clearPractice = document.getElementById('clearPractice');
+
+    let masks = []; // { img: Image, name: string, visible: bool, tint: string, opacity: number, blend: string }
+
+    const maskUpload = document.getElementById('maskUpload');
+    const clearMasks = document.getElementById('clearMasks');
+    const maskList = document.getElementById('maskList');
 
     async function init() {
       await tf.setBackend('webgl');
@@ -301,12 +314,164 @@
     practiceModeToggle.addEventListener('change', draw);
     toggleLabels.addEventListener('change', draw);
 
+    maskUpload.addEventListener('change', () => {
+      for (const file of maskUpload.files) {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.src = url;
+        img.onload = () => {
+          masks.push({
+            img,
+            name: file.name,
+            visible: true,
+            tint: '#ffffff',
+            opacity: 1,
+            blend: 'source-over'
+          });
+          updateMaskList();
+          draw();
+        };
+      }
+      maskUpload.value = '';
+    });
+
+    clearMasks.addEventListener('click', () => {
+      masks.forEach(m => URL.revokeObjectURL(m.img.src));
+      masks = [];
+      updateMaskList();
+      draw();
+    });
+
+    function updateMaskList() {
+      maskList.innerHTML = '';
+      masks.forEach((m, i) => {
+        const li = document.createElement('li');
+        li.style.display = 'flex';
+        li.style.alignItems = 'center';
+        li.style.gap = '0.5rem';
+
+        // Visibility toggle
+        const vis = document.createElement('input');
+        vis.type = 'checkbox';
+        vis.checked = m.visible;
+        vis.title = 'Show/hide mask';
+        vis.addEventListener('change', () => {
+          m.visible = vis.checked;
+          draw();
+        });
+        li.appendChild(vis);
+
+        // Mask name
+        li.appendChild(document.createTextNode(m.name));
+
+        // Tint color picker
+        const tint = document.createElement('input');
+        tint.type = 'color';
+        tint.value = m.tint || '#ffffff';
+        tint.title = 'Tint color';
+        tint.addEventListener('input', () => {
+          m.tint = tint.value;
+          draw();
+        });
+        li.appendChild(tint);
+
+        // Opacity slider
+        const opacity = document.createElement('input');
+        opacity.type = 'range';
+        opacity.min = 0;
+        opacity.max = 1;
+        opacity.step = 0.01;
+        opacity.value = m.opacity ?? 1;
+        opacity.title = 'Opacity';
+        opacity.style.width = '60px';
+        opacity.addEventListener('input', () => {
+          m.opacity = parseFloat(opacity.value);
+          draw();
+        });
+        li.appendChild(opacity);
+
+        // Blend mode select
+        const blend = document.createElement('select');
+        [
+          'source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'
+        ].forEach(mode => {
+          const opt = document.createElement('option');
+          opt.value = mode;
+          opt.textContent = mode;
+          if (m.blend === mode) opt.selected = true;
+          blend.appendChild(opt);
+        });
+        blend.title = 'Blend mode';
+        blend.addEventListener('change', () => {
+          m.blend = blend.value;
+          draw();
+        });
+        li.appendChild(blend);
+
+        // Move up
+        const up = document.createElement('button');
+        up.textContent = '↑';
+        up.disabled = i === 0;
+        up.addEventListener('click', () => {
+          [masks[i-1], masks[i]] = [masks[i], masks[i-1]];
+          updateMaskList();
+          draw();
+        });
+        li.appendChild(up);
+
+        // Move down
+        const down = document.createElement('button');
+        down.textContent = '↓';
+        down.disabled = i === masks.length-1;
+        down.addEventListener('click', () => {
+          [masks[i], masks[i+1]] = [masks[i+1], masks[i]];
+          updateMaskList();
+          draw();
+        });
+        li.appendChild(down);
+
+        // Remove
+        const rm = document.createElement('button');
+        rm.textContent = '✕';
+        rm.addEventListener('click', () => {
+          URL.revokeObjectURL(m.img.src);
+          masks.splice(i,1);
+          updateMaskList();
+          draw();
+        });
+        li.appendChild(rm);
+
+        maskList.appendChild(li);
+      });
+    }
+
     function draw() {
       if (!imgEl) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
       ctx.drawImage(imgEl, 0, 0);
+
+      // Draw stacked masks
+      masks.forEach(m => {
+        if (!m.visible) return;
+        ctx.save();
+        ctx.globalAlpha = m.opacity ?? 1;
+        ctx.globalCompositeOperation = m.blend || 'source-over';
+
+        // Draw the mask image
+        ctx.drawImage(m.img, 0, 0, imgEl.naturalWidth, imgEl.naturalHeight);
+
+        // Apply tint if not white
+        if (m.tint && m.tint !== '#ffffff') {
+          ctx.globalCompositeOperation = 'source-atop';
+          ctx.fillStyle = m.tint;
+          ctx.globalAlpha = (m.opacity ?? 1);
+          ctx.fillRect(0, 0, imgEl.naturalWidth, imgEl.naturalHeight);
+        }
+
+        ctx.restore();
+      });
 
       const ptSize = basePointSize / scale;
       const fSize = Math.max(baseFontSize / scale, 4);
@@ -321,8 +486,8 @@
       }
 
       keypoints.forEach((p, i) => {
-        if (showOnly && !showOnly.includes(i)) return;
-        ctx.fillStyle = 'red';
+
+        if (showOnly && !showOnly.includes(i)) return;        ctx.fillStyle = 'red';
         ctx.beginPath(); ctx.arc(p.x, p.y, ptSize, 0, 2 * Math.PI); ctx.fill();
         if (toggleLabels.checked) {
           ctx.fillStyle = 'yellow';
