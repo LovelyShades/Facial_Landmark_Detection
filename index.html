@@ -1,82 +1,193 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <title>Face Keypoint Visualizer</title>
+  <title>Face Keypoint Debugger</title>
   <style>
-    body { font-family: sans-serif; text-align: center; margin: 20px; }
-    #status { font-style: italic; margin-bottom: 1rem; }
-    canvas { border: 1px solid #ccc; max-width: 100%; height: auto; }
-    #upload { margin-top: 1rem; }
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin: 20px;
+    }
+
+    #controls {
+      margin-bottom: 1rem;
+    }
+
+    #container {
+      width: 100%;
+      height: 80vh;
+      overflow: auto;
+      border: 1px solid #ccc;
+    }
+
+    #canvas {
+      display: block;
+      margin: 0 auto;
+      cursor: grab;
+    }
+
+    #canvas:active {
+      cursor: grabbing;
+    }
+
+    label {
+      margin-left: 0.5rem;
+    }
   </style>
 </head>
+
 <body>
-  <h1>Face Keypoint Visualizer</h1>
-  <div id="status">Loading…</div>
-  <input type="file" id="upload" accept="image/*" />
-  <br />
-  <canvas id="canvas"></canvas>
+  <h1>Face Keypoint Debugger</h1>
+  <div id="controls">
+    <input type="file" id="upload" accept="image/*" />
+    <label><input type="checkbox" id="toggleLabels" checked /> Show Labels</label>
+  </div>
 
-  <!-- load the single tfjs bundle -->
+  <div id="container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- TensorFlow.js & FaceMesh -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <!-- then the face-landmarks model -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
-
   <script>
-    const statusEl = document.getElementById('status');
-    const canvas   = document.getElementById('canvas');
-    let   detector = null;
+    let detector, imgEl;
+    let keypoints = [];
+    let selectedIdx = null;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const upload = document.getElementById('upload');
+    const toggleLabels = document.getElementById('toggleLabels');
+
+    // transform state
+    let scale = 1, minScale = 0.5, maxScale = 5;
+    let offsetX = 0, offsetY = 0;
+    let isDragging = false, startX = 0, startY = 0;
 
     async function init() {
-      statusEl.textContent = 'Initializing WebGL…';
-      await tf.setBackend('webgl');
-      await tf.ready();
-      statusEl.textContent = 'Loading FaceMesh…';
+      await tf.setBackend('webgl'); await tf.ready();
       detector = await faceLandmarksDetection.createDetector(
         faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
         { runtime: 'tfjs' }
       );
-      statusEl.textContent = 'Model loaded! Upload an image.';
-      console.log('✔️ Detector ready');
     }
     init();
 
-    document.getElementById('upload').addEventListener('change', async e => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const img = new Image();
-      img.onload = async () => {
-        const ctx = canvas.getContext('2d');
-        // set internal resolution to the image size
-        canvas.width  = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        // draw the image
-        ctx.drawImage(img, 0, 0);
+    upload.addEventListener('change', async () => {
+      const file = upload.files[0]; if (!file) return;
+      imgEl = new Image();
+      imgEl.onload = async () => {
+        // size canvas to image
+        canvas.width = imgEl.naturalWidth;
+        canvas.height = imgEl.naturalHeight;
+        // center initially
+        offsetX = (canvas.width * (1 - scale)) / 2;
+        offsetY = (canvas.height * (1 - scale)) / 2;
 
-        if (!detector) return console.warn('Detector not ready');
-        const preds = await detector.estimateFaces(img);
-        if (!preds.length) return alert('No faces detected');
+        // downscale for detection
+        const MAX = 512;
+        let w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+        const ratio = Math.min(1, MAX / Math.max(w, h));
+        const off = document.createElement('canvas');
+        off.width = w * ratio; off.height = h * ratio;
+        off.getContext('2d').drawImage(imgEl, 0, 0, w, h, 0, 0, off.width, off.height);
 
-        const kp = preds[0].keypoints;
-
-        // draw & label every keypoint
-        ctx.lineWidth = 0.5;
-        ctx.font      = '6px sans-serif';
-
-        kp.forEach((p, i) => {
-          // tiny dot
-          ctx.fillStyle = 'red';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 1, 0, 2 * Math.PI);
-          ctx.fill();
-
-          // index label
-          ctx.fillStyle = 'yellow';
-          ctx.fillText(i, p.x + 2, p.y - 2);
-        });
+        const preds = await detector.estimateFaces(off);
+        if (!preds.length) { alert('No face detected'); return; }
+        // rescale points to full size
+        keypoints = preds[0].keypoints.map(p => ({
+          x: p.x * (w / off.width),
+          y: p.y * (h / off.height)
+        }));
+        draw();
       };
-      img.src = URL.createObjectURL(file);
+      imgEl.src = URL.createObjectURL(file);
     });
+
+    function clearCanvas() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function draw() {
+      if (!imgEl) return;
+      clearCanvas();
+      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+      ctx.drawImage(imgEl, 0, 0);
+
+      const ptSize = 5 / scale;
+      const fontSize = Math.max(8 / scale, 4);
+      ctx.lineWidth = 1 / scale;
+      ctx.font = `${fontSize}px sans-serif`;
+      ctx.textBaseline = 'top';
+
+      keypoints.forEach((p, i) => {
+        ctx.fillStyle = 'red';
+        ctx.beginPath(); ctx.arc(p.x, p.y, ptSize, 0, 2 * Math.PI); ctx.fill();
+        if (toggleLabels.checked) {
+          ctx.fillStyle = 'yellow';
+          ctx.fillText(i, p.x + ptSize, p.y - fontSize);
+        }
+      });
+
+      if (selectedIdx !== null) {
+        const p = keypoints[selectedIdx];
+        ctx.fillStyle = 'cyan';
+        ctx.beginPath(); ctx.arc(p.x, p.y, ptSize * 1.5, 0, 2 * Math.PI); ctx.fill();
+        if (toggleLabels.checked) {
+          const label = selectedIdx.toString();
+          const tx = p.x + ptSize, ty = p.y - fontSize;
+          const pad = 4 / scale;
+          const m = ctx.measureText(label);
+          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.fillRect(tx - pad, ty - pad, m.width + pad * 2, fontSize + pad * 2);
+          ctx.fillStyle = 'white';
+          ctx.fillText(label, tx, ty);
+        }
+      }
+    }
+
+    // zoom
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const { offsetX: mx, offsetY: my, deltaY } = e;
+      const amt = deltaY < 0 ? 1.1 : 0.9;
+      const newScale = Math.min(maxScale, Math.max(minScale, scale * amt));
+      offsetX = mx - (mx - offsetX) * (newScale / scale);
+      offsetY = my - (my - offsetY) * (newScale / scale);
+      scale = newScale;
+      draw();
+    });
+    // pan
+    canvas.addEventListener('mousedown', e => { isDragging = true; startX = e.clientX; startY = e.clientY; });
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      offsetX += e.clientX - startX;
+      offsetY += e.clientY - startY;
+      startX = e.clientX; startY = e.clientY;
+      draw();
+    });
+    window.addEventListener('mouseup', () => { isDragging = false; });
+
+    // select using offsetX/Y for accuracy
+    canvas.addEventListener('click', e => {
+      if (!keypoints.length) return;
+      const x = (e.offsetX - offsetX) / scale;
+      const y = (e.offsetY - offsetY) / scale;
+      let best = -1, minD = Infinity;
+      keypoints.forEach((p, i) => {
+        const dx = p.x - x, dy = p.y - y, d = dx * dx + dy * dy;
+        if (d < minD) { minD = d; best = i; }
+      });
+      if (Math.sqrt(minD) < 10 / scale) selectedIdx = selectedIdx === best ? null : best;
+      draw();
+    });
+
+    toggleLabels.addEventListener('change', draw);
   </script>
 </body>
+
 </html>
