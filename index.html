@@ -74,6 +74,14 @@
     #practiceControls select {
       width: 100%;
     }
+
+    #practiceActions {
+      display: none;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 0.5rem;
+    }
   </style>
 </head>
 
@@ -109,11 +117,15 @@
       <select id="practiceSetSelect">
         <option value="">-- choose set --</option>
       </select>
+      <div id="practiceActions">
+        <button id="editPracticeSet">Edit Set</button>
+        <button id="deletePracticeSet">Delete Set</button>
+      </div>
       <label>
         <input type="checkbox" id="practiceModeToggle" />
         Show Only Selected
       </label>
-      <button id="clearPractice">Clear Sets</button>
+      <button id="clearPractice">Clear All Sets</button>
     </div>
   </div>
 
@@ -130,10 +142,10 @@
     let offsetX = 0, offsetY = 0;
     let isDragging = false, startX = 0, startY = 0, startOffX = 0, startOffY = 0;
 
-    // UI state
     let basePointSize = 5;
     let baseFontSize = 12;
-    const practiceSets = {};  // name => [indices]
+    let editingSet = null;
+    const practiceSets = {};
 
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -148,6 +160,9 @@
     const practicePoints = document.getElementById('practicePoints');
     const addPracticeSet = document.getElementById('addPracticeSet');
     const practiceSetSelect = document.getElementById('practiceSetSelect');
+    const practiceActions = document.getElementById('practiceActions');
+    const editPracticeSet = document.getElementById('editPracticeSet');
+    const deletePracticeSet = document.getElementById('deletePracticeSet');
     const practiceModeToggle = document.getElementById('practiceModeToggle');
     const clearPractice = document.getElementById('clearPractice');
 
@@ -158,10 +173,32 @@
         faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
         { runtime: 'tfjs' }
       );
+      loadSets();
+      populateDropdown();
     }
     init();
 
-    // --- file upload / detection ---
+    function saveSets() {
+      localStorage.setItem('practiceSets', JSON.stringify(practiceSets));
+    }
+
+    function loadSets() {
+      const saved = localStorage.getItem('practiceSets');
+      if (!saved) return;
+      try {
+        const obj = JSON.parse(saved);
+        Object.assign(practiceSets, obj);
+      } catch { }
+    }
+
+    function populateDropdown() {
+      practiceSetSelect.innerHTML = '<option value="">-- choose set --</option>';
+      for (let name in practiceSets) {
+        practiceSetSelect.innerHTML += `<option value="${name}">${name}</option>`;
+      }
+      practiceActions.style.display = 'none';
+    }
+
     upload.addEventListener('change', async () => {
       if (imgURL) {
         URL.revokeObjectURL(imgURL);
@@ -170,57 +207,32 @@
         keypoints = [];
         selectedIdx = null;
       }
-      const file = upload.files[0];
-      if (!file) return;
+      const file = upload.files[0]; if (!file) return;
       imgURL = URL.createObjectURL(file);
-      imgEl = new Image();
-      imgEl.src = imgURL;
-
+      imgEl = new Image(); imgEl.src = imgURL;
       imgEl.onload = async () => {
         const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
         const cw = container.clientWidth, ch = container.clientHeight;
         canvas.width = cw; canvas.height = ch;
-        canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
-
         scale = minScale = Math.min(cw / w, ch / h, 1);
         offsetX = (cw - w * scale) / 2;
         offsetY = (ch - h * scale) / 2;
-
-        // run detection on a downscaled offscreen for speed
-        const MAX = 512;
-        const ratio = Math.min(1, MAX / Math.max(w, h));
+        const MAX = 512, ratio = Math.min(1, MAX / Math.max(w, h));
         const off = document.createElement('canvas');
         off.width = w * ratio; off.height = h * ratio;
         off.getContext('2d').drawImage(imgEl, 0, 0, w, h, 0, 0, off.width, off.height);
-
         const preds = await detector.estimateFaces(off);
-        if (!preds.length) {
-          alert('No face detected');
-          return;
-        }
-
-        keypoints = preds[0].keypoints.map(p => ({
-          x: p.x * (w / off.width),
-          y: p.y * (h / off.height)
-        }));
-
-        upload.style.display = 'none';
-        removeFace.style.display = 'inline-block';
+        if (!preds.length) { alert('No face detected'); return; }
+        keypoints = preds[0].keypoints.map(p => ({ x: p.x * (w / off.width), y: p.y * (h / off.height) }));
+        upload.style.display = 'none'; removeFace.style.display = 'inline-block';
         draw();
       };
     });
 
     removeFace.addEventListener('click', () => window.location.reload());
 
-    // --- UI listeners ---
-    pointSizeSlider.addEventListener('input', () => {
-      basePointSize = +pointSizeSlider.value;
-      draw();
-    });
-    fontSizeSlider.addEventListener('input', () => {
-      baseFontSize = +fontSizeSlider.value;
-      draw();
-    });
+    pointSizeSlider.addEventListener('input', () => { basePointSize = +pointSizeSlider.value; draw(); });
+    fontSizeSlider.addEventListener('input', () => { baseFontSize = +fontSizeSlider.value; draw(); });
 
     practiceToggle.addEventListener('click', () => {
       const open = practiceControls.style.display === 'flex';
@@ -230,33 +242,65 @@
 
     addPracticeSet.addEventListener('click', () => {
       const name = practiceName.value.trim();
-      const list = practicePoints.value
-        .split(',')
-        .map(s => parseInt(s, 10))
-        .filter(n => !isNaN(n));
-      if (!name || !list.length) return alert('Need a name and at least one index');
-      practiceSets[name] = list;
-      // repopulate dropdown
-      practiceSetSelect.innerHTML = '<option value="">-- choose set --</option>';
-      for (let k in practiceSets) {
-        practiceSetSelect.innerHTML += `<option value="${k}">${k}</option>`;
+      const arr = practicePoints.value.split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+      if (!name || !arr.length) return alert('Need name & indices');
+      // if editing existing
+      if (editingSet) {
+        // remove old key if renamed
+        if (name !== editingSet) {
+          delete practiceSets[editingSet];
+        }
       }
+      practiceSets[name] = arr;
+      saveSets();
+      populateDropdown();
+      editingSet = null;
+      addPracticeSet.textContent = 'Add Set';
       practiceName.value = '';
       practicePoints.value = '';
     });
 
-    clearPractice.addEventListener('click', () => {
-      for (let k in practiceSets) delete practiceSets[k];
-      practiceSetSelect.innerHTML = '<option value="">-- choose set --</option>';
+    practiceSetSelect.addEventListener('change', () => {
+      if (practiceSetSelect.value) {
+        practiceActions.style.display = 'flex';
+      } else {
+        practiceActions.style.display = 'none';
+      }
+      draw();
+    });
+
+    editPracticeSet.addEventListener('click', () => {
+      const name = practiceSetSelect.value;
+      if (!name) return;
+      editingSet = name;
+      practiceName.value = name;
+      practicePoints.value = practiceSets[name].join(', ');
+      addPracticeSet.textContent = 'Update Set';
+    });
+
+    deletePracticeSet.addEventListener('click', () => {
+      const name = practiceSetSelect.value;
+      if (!name) return;
+      if (!confirm(`Delete set “${name}”?`)) return;
+      delete practiceSets[name];
+      saveSets();
+      populateDropdown();
       practiceModeToggle.checked = false;
       draw();
     });
 
-    practiceSetSelect.addEventListener('change', draw);
+    clearPractice.addEventListener('click', () => {
+      if (!confirm('Clear ALL sets?')) return;
+      for (let k in practiceSets) delete practiceSets[k];
+      saveSets();
+      populateDropdown();
+      practiceModeToggle.checked = false;
+      draw();
+    });
+
     practiceModeToggle.addEventListener('change', draw);
     toggleLabels.addEventListener('change', draw);
 
-    // --- draw loop ---
     function draw() {
       if (!imgEl) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -265,16 +309,15 @@
       ctx.drawImage(imgEl, 0, 0);
 
       const ptSize = basePointSize / scale;
-      const fontSize = Math.max(baseFontSize / scale, 4);
+      const fSize = Math.max(baseFontSize / scale, 4);
       ctx.lineWidth = 1 / scale;
-      ctx.font = `${fontSize}px sans-serif`;
+      ctx.font = `${fSize}px sans-serif`;
       ctx.textBaseline = 'top';
 
-      // figure out which to show if in practice mode
       let showOnly = null;
       if (practiceModeToggle.checked) {
-        const setName = practiceSetSelect.value;
-        showOnly = practiceSets[setName] || [];
+        const sel = practiceSetSelect.value;
+        showOnly = practiceSets[sel] || [];
       }
 
       keypoints.forEach((p, i) => {
@@ -283,7 +326,7 @@
         ctx.beginPath(); ctx.arc(p.x, p.y, ptSize, 0, 2 * Math.PI); ctx.fill();
         if (toggleLabels.checked) {
           ctx.fillStyle = 'yellow';
-          ctx.fillText(i, p.x + ptSize, p.y - fontSize);
+          ctx.fillText(i, p.x + ptSize, p.y - fSize);
         }
       });
 
@@ -292,27 +335,26 @@
         ctx.fillStyle = 'cyan';
         ctx.beginPath(); ctx.arc(p.x, p.y, ptSize * 1.5, 0, 2 * Math.PI); ctx.fill();
         if (toggleLabels.checked) {
-          const label = selectedIdx.toString();
-          const tx = p.x + ptSize, ty = p.y - fontSize;
+          const lbl = selectedIdx.toString();
+          const tx = p.x + ptSize, ty = p.y - fSize;
           const pad = 4 / scale;
-          const m = ctx.measureText(label);
+          const m = ctx.measureText(lbl);
           ctx.fillStyle = 'rgba(0,0,0,0.7)';
-          ctx.fillRect(tx - pad, ty - pad, m.width + pad * 2, fontSize + pad * 2);
+          ctx.fillRect(tx - pad, ty - pad, m.width + pad * 2, fSize + pad * 2);
           ctx.fillStyle = 'white';
-          ctx.fillText(label, tx, ty);
+          ctx.fillText(lbl, tx, ty);
         }
       }
     }
 
-    // --- zoom & pan & select unchanged ---
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
       const mx = e.offsetX, my = e.offsetY;
       const amt = e.deltaY < 0 ? 1.1 : 0.9;
-      const newScale = Math.min(maxScale, Math.max(minScale, scale * amt));
-      offsetX = mx - (mx - offsetX) * (newScale / scale);
-      offsetY = my - (my - offsetY) * (newScale / scale);
-      scale = newScale;
+      const ns = Math.min(maxScale, Math.max(minScale, scale * amt));
+      offsetX = mx - (mx - offsetX) * (ns / scale);
+      offsetY = my - (my - offsetY) * (ns / scale);
+      scale = ns;
       draw();
     });
 
