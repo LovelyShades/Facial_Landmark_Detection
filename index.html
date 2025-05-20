@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Face Keypoint Visualizer</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 20px; }
+    #status { font-style: italic; margin-bottom: 1rem; }
+    canvas { border: 1px solid #ccc; max-width: 100%; height: auto; }
+    #upload { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Face Keypoint Visualizer</h1>
+  <div id="status">Loading…</div>
+  <input type="file" id="upload" accept="image/*" />
+  <br />
+  <canvas id="canvas"></canvas>
+
+  <!-- load the single tfjs bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <!-- then the face-landmarks model -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const canvas   = document.getElementById('canvas');
+    let   detector = null;
+
+    async function init() {
+      statusEl.textContent = 'Initializing WebGL…';
+      await tf.setBackend('webgl');
+      await tf.ready();
+
+      statusEl.textContent = 'Loading FaceMesh…';
+      detector = await faceLandmarksDetection.createDetector(
+        faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+        { runtime: 'tfjs' }
+      );
+
+      statusEl.textContent = 'Model loaded! Upload an image.';
+      console.log('✔️ Detector ready');
+    }
+    init();
+
+    document.getElementById('upload').addEventListener('change', async e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = async () => {
+        const ctx = canvas.getContext('2d');
+        canvas.width  = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.drawImage(img, 0, 0);
+
+        if (!detector) return console.warn('Detector not ready');
+        const preds = await detector.estimateFaces(img);
+        if (!preds.length) return alert('No faces detected');
+
+        // draw your eight feature points:
+        const kp = preds[0].keypoints;
+        const features = {
+          forehead:     10,
+          rightTemple: 389,
+          leftTemple:  162,
+          rightCheek:  454,
+          leftCheek:   234,
+          rightJaw:    435,
+          leftJaw:     58,
+          chin:        152
+        };
+
+        ctx.lineWidth = 2;
+        ctx.font      = '14px sans-serif';
+
+        for (let [name, idx] of Object.entries(features)) {
+          let p = kp[idx];
+          ctx.fillStyle   = 'red';
+          ctx.strokeStyle = 'white';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = 'yellow';
+          ctx.fillText(`${name} (${idx})`, p.x + 8, p.y - 8);
+        }
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  </script>
+</body>
+</html>
