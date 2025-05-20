@@ -13,18 +13,23 @@
 
     #controls {
       margin-bottom: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
     }
 
     #container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
       width: 100%;
       height: 80vh;
-      overflow: auto;
       border: 1px solid #ccc;
+      overflow: auto;
     }
 
     #canvas {
-      display: block;
-      margin: 0 auto;
       cursor: grab;
     }
 
@@ -32,8 +37,42 @@
       cursor: grabbing;
     }
 
-    label {
-      margin-left: 0.5rem;
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .control-group input[type="range"] {
+      width: 100px;
+    }
+
+    #practicePanel {
+      border: 1px solid #aaa;
+      padding: 0.5rem;
+      max-width: 300px;
+      margin: 0 auto;
+      text-align: left;
+    }
+
+    #practicePanel h3 {
+      margin: 0;
+      cursor: pointer;
+      user-select: none;
+      font-size: 1rem;
+    }
+
+    #practiceControls {
+      margin-top: 0.5rem;
+      display: none;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    #practiceControls input,
+    #practiceControls button,
+    #practiceControls select {
+      width: 100%;
     }
   </style>
 </head>
@@ -41,34 +80,80 @@
 <body>
   <h1>Face Keypoint Debugger</h1>
   <div id="controls">
-    <input type="file" id="upload" accept="image/*" />
-    <label><input type="checkbox" id="toggleLabels" checked /> Show Labels</label>
+    <div class="control-group">
+      <input type="file" id="upload" accept="image/*" />
+      <button id="removeFace" style="display:none;">Remove Face</button>
+    </div>
+
+    <div class="control-group">
+      <label><input type="checkbox" id="toggleLabels" checked /> Show Labels</label>
+    </div>
+
+    <div class="control-group">
+      <label for="pointSizeSlider">Point Size</label>
+      <input type="range" id="pointSizeSlider" min="2" max="20" value="5" />
+    </div>
+
+    <div class="control-group">
+      <label for="fontSizeSlider">Font Size</label>
+      <input type="range" id="fontSizeSlider" min="4" max="32" value="12" />
+    </div>
+  </div>
+
+  <div id="practicePanel">
+    <h3 id="practiceToggle">▶ Practice Mode</h3>
+    <div id="practiceControls">
+      <input type="text" id="practiceName" placeholder="Set Name (e.g. “Eyes”)" />
+      <input type="text" id="practicePoints" placeholder="Indices (e.g. 33, 7, 109)" />
+      <button id="addPracticeSet">Add Set</button>
+      <select id="practiceSetSelect">
+        <option value="">-- choose set --</option>
+      </select>
+      <label>
+        <input type="checkbox" id="practiceModeToggle" />
+        Show Only Selected
+      </label>
+      <button id="clearPractice">Clear Sets</button>
+    </div>
   </div>
 
   <div id="container">
     <canvas id="canvas"></canvas>
   </div>
 
-  <!-- TensorFlow.js & FaceMesh -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
   <script>
-    let detector, imgEl;
-    let keypoints = [];
-    let selectedIdx = null;
+    let detector, imgEl, imgURL;
+    let keypoints = [], selectedIdx = null;
+    let scale = 1, minScale = 1, maxScale = 5;
+    let offsetX = 0, offsetY = 0;
+    let isDragging = false, startX = 0, startY = 0, startOffX = 0, startOffY = 0;
+
+    // UI state
+    let basePointSize = 5;
+    let baseFontSize = 12;
+    const practiceSets = {};  // name => [indices]
 
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const upload = document.getElementById('upload');
+    const removeFace = document.getElementById('removeFace');
     const toggleLabels = document.getElementById('toggleLabels');
-
-    // transform state
-    let scale = 1, minScale = 0.5, maxScale = 5;
-    let offsetX = 0, offsetY = 0;
-    let isDragging = false, startX = 0, startY = 0;
+    const pointSizeSlider = document.getElementById('pointSizeSlider');
+    const fontSizeSlider = document.getElementById('fontSizeSlider');
+    const practiceToggle = document.getElementById('practiceToggle');
+    const practiceControls = document.getElementById('practiceControls');
+    const practiceName = document.getElementById('practiceName');
+    const practicePoints = document.getElementById('practicePoints');
+    const addPracticeSet = document.getElementById('addPracticeSet');
+    const practiceSetSelect = document.getElementById('practiceSetSelect');
+    const practiceModeToggle = document.getElementById('practiceModeToggle');
+    const clearPractice = document.getElementById('clearPractice');
 
     async function init() {
-      await tf.setBackend('webgl'); await tf.ready();
+      await tf.setBackend('webgl');
+      await tf.ready();
       detector = await faceLandmarksDetection.createDetector(
         faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
         { runtime: 'tfjs' }
@@ -76,55 +161,124 @@
     }
     init();
 
+    // --- file upload / detection ---
     upload.addEventListener('change', async () => {
-      const file = upload.files[0]; if (!file) return;
+      if (imgURL) {
+        URL.revokeObjectURL(imgURL);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        keypoints = [];
+        selectedIdx = null;
+      }
+      const file = upload.files[0];
+      if (!file) return;
+      imgURL = URL.createObjectURL(file);
       imgEl = new Image();
-      imgEl.onload = async () => {
-        // size canvas to image
-        canvas.width = imgEl.naturalWidth;
-        canvas.height = imgEl.naturalHeight;
-        // center initially
-        offsetX = (canvas.width * (1 - scale)) / 2;
-        offsetY = (canvas.height * (1 - scale)) / 2;
+      imgEl.src = imgURL;
 
-        // downscale for detection
+      imgEl.onload = async () => {
+        const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+        const cw = container.clientWidth, ch = container.clientHeight;
+        canvas.width = cw; canvas.height = ch;
+        canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+
+        scale = minScale = Math.min(cw / w, ch / h, 1);
+        offsetX = (cw - w * scale) / 2;
+        offsetY = (ch - h * scale) / 2;
+
+        // run detection on a downscaled offscreen for speed
         const MAX = 512;
-        let w = imgEl.naturalWidth, h = imgEl.naturalHeight;
         const ratio = Math.min(1, MAX / Math.max(w, h));
         const off = document.createElement('canvas');
         off.width = w * ratio; off.height = h * ratio;
         off.getContext('2d').drawImage(imgEl, 0, 0, w, h, 0, 0, off.width, off.height);
 
         const preds = await detector.estimateFaces(off);
-        if (!preds.length) { alert('No face detected'); return; }
-        // rescale points to full size
+        if (!preds.length) {
+          alert('No face detected');
+          return;
+        }
+
         keypoints = preds[0].keypoints.map(p => ({
           x: p.x * (w / off.width),
           y: p.y * (h / off.height)
         }));
+
+        upload.style.display = 'none';
+        removeFace.style.display = 'inline-block';
         draw();
       };
-      imgEl.src = URL.createObjectURL(file);
     });
 
-    function clearCanvas() {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    removeFace.addEventListener('click', () => window.location.reload());
 
+    // --- UI listeners ---
+    pointSizeSlider.addEventListener('input', () => {
+      basePointSize = +pointSizeSlider.value;
+      draw();
+    });
+    fontSizeSlider.addEventListener('input', () => {
+      baseFontSize = +fontSizeSlider.value;
+      draw();
+    });
+
+    practiceToggle.addEventListener('click', () => {
+      const open = practiceControls.style.display === 'flex';
+      practiceControls.style.display = open ? 'none' : 'flex';
+      practiceToggle.textContent = (open ? '▶ ' : '▼ ') + 'Practice Mode';
+    });
+
+    addPracticeSet.addEventListener('click', () => {
+      const name = practiceName.value.trim();
+      const list = practicePoints.value
+        .split(',')
+        .map(s => parseInt(s, 10))
+        .filter(n => !isNaN(n));
+      if (!name || !list.length) return alert('Need a name and at least one index');
+      practiceSets[name] = list;
+      // repopulate dropdown
+      practiceSetSelect.innerHTML = '<option value="">-- choose set --</option>';
+      for (let k in practiceSets) {
+        practiceSetSelect.innerHTML += `<option value="${k}">${k}</option>`;
+      }
+      practiceName.value = '';
+      practicePoints.value = '';
+    });
+
+    clearPractice.addEventListener('click', () => {
+      for (let k in practiceSets) delete practiceSets[k];
+      practiceSetSelect.innerHTML = '<option value="">-- choose set --</option>';
+      practiceModeToggle.checked = false;
+      draw();
+    });
+
+    practiceSetSelect.addEventListener('change', draw);
+    practiceModeToggle.addEventListener('change', draw);
+    toggleLabels.addEventListener('change', draw);
+
+    // --- draw loop ---
     function draw() {
       if (!imgEl) return;
-      clearCanvas();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
       ctx.drawImage(imgEl, 0, 0);
 
-      const ptSize = 5 / scale;
-      const fontSize = Math.max(8 / scale, 4);
+      const ptSize = basePointSize / scale;
+      const fontSize = Math.max(baseFontSize / scale, 4);
       ctx.lineWidth = 1 / scale;
       ctx.font = `${fontSize}px sans-serif`;
       ctx.textBaseline = 'top';
 
+      // figure out which to show if in practice mode
+      let showOnly = null;
+      if (practiceModeToggle.checked) {
+        const setName = practiceSetSelect.value;
+        showOnly = practiceSets[setName] || [];
+      }
+
       keypoints.forEach((p, i) => {
+        if (showOnly && !showOnly.includes(i)) return;
         ctx.fillStyle = 'red';
         ctx.beginPath(); ctx.arc(p.x, p.y, ptSize, 0, 2 * Math.PI); ctx.fill();
         if (toggleLabels.checked) {
@@ -150,43 +304,45 @@
       }
     }
 
-    // zoom
+    // --- zoom & pan & select unchanged ---
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
-      const { offsetX: mx, offsetY: my, deltaY } = e;
-      const amt = deltaY < 0 ? 1.1 : 0.9;
+      const mx = e.offsetX, my = e.offsetY;
+      const amt = e.deltaY < 0 ? 1.1 : 0.9;
       const newScale = Math.min(maxScale, Math.max(minScale, scale * amt));
       offsetX = mx - (mx - offsetX) * (newScale / scale);
       offsetY = my - (my - offsetY) * (newScale / scale);
       scale = newScale;
       draw();
     });
-    // pan
-    canvas.addEventListener('mousedown', e => { isDragging = true; startX = e.clientX; startY = e.clientY; });
+
+    canvas.addEventListener('mousedown', e => {
+      isDragging = true;
+      startX = e.clientX; startY = e.clientY;
+      startOffX = offsetX; startOffY = offsetY;
+    });
     window.addEventListener('mousemove', e => {
       if (!isDragging) return;
-      offsetX += e.clientX - startX;
-      offsetY += e.clientY - startY;
-      startX = e.clientX; startY = e.clientY;
+      offsetX = startOffX + (e.clientX - startX);
+      offsetY = startOffY + (e.clientY - startY);
       draw();
     });
     window.addEventListener('mouseup', () => { isDragging = false; });
 
-    // select using offsetX/Y for accuracy
     canvas.addEventListener('click', e => {
       if (!keypoints.length) return;
       const x = (e.offsetX - offsetX) / scale;
       const y = (e.offsetY - offsetY) / scale;
       let best = -1, minD = Infinity;
       keypoints.forEach((p, i) => {
-        const dx = p.x - x, dy = p.y - y, d = dx * dx + dy * dy;
+        const d = (p.x - x) ** 2 + (p.y - y) ** 2;
         if (d < minD) { minD = d; best = i; }
       });
-      if (Math.sqrt(minD) < 10 / scale) selectedIdx = selectedIdx === best ? null : best;
-      draw();
+      if (Math.sqrt(minD) < 10 / scale) {
+        selectedIdx = (selectedIdx === best ? null : best);
+        draw();
+      }
     });
-
-    toggleLabels.addEventListener('change', draw);
   </script>
 </body>
 
