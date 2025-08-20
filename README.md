@@ -38,6 +38,11 @@ A modern browser (Chrome/Edge/Firefox).
 To avoid any local file restrictions, serve the folder over HTTP:
 
 ```bash
+
+# clone repo
+git clone https://github.com/LovelyShades/Facial_Landmark_Detection.git
+cd Facial_Landmark_Detection
+
 # Option A: Python 3
 python -m http.server 8000
 
