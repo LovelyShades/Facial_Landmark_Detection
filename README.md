@@ -1,28 +1,148 @@
-# 💼 Project Showcase – Facial Landmark Detection Debugging UI
+# 👁️‍🗺️ Facial Landmark Debugger (Web Demo)
 
-This project is a **public showcase** of our work and technical skills. It is intended for educational, portfolio, and demonstration purposes only.
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Browser-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
 
-## 🚫 Usage Restrictions
+A browser-based **Facial Landmark / Keypoint Debugger** that lets you upload an image, detect face landmarks (MediaPipe FaceMesh via TFJS), and **inspect, label, and practice** specific keypoint sets.  
+Includes **zoom/pan**, **label toggles**, **point/font size controls**, and a **stackable mask overlay system** with tint, opacity, and blend modes.
 
-**Unauthorized commercial use, redistribution, or modification of this code is strictly prohibited.**  
-All rights are reserved to the original author.
-
-> 🔒 While the repository is public for hiring and educational review, the contents remain the intellectual property of Alanna Matundan & Luke Lyons. You may view the code, but not use it in your own projects unless explicit permission is granted.
-
-## 📄 License
-
-This project is shared under a **Custom No-Use License**:
-- ✅ You may view and reference the code.
-- ❌ You may not copy, reuse, or distribute it.
-- ❌ You may not use this project as part of your own work (academic, personal, or commercial).
-
-**If you're interested in using any part of this project or collaborating, feel free to contact me: rosealanna18@gmail.com **
-
-## 👩‍💻 Authors
-
-Created and maintained by Alanna Matundan and Luke Lyons  
-
+> **Author:** Alanna Matundan  
+> **Purpose:** Learning · Debugging · Practice/Study Tool
 
 ---
 
-© 2025 Alanna Matundan & Luke Lyons. All rights reserved.
+## ✨ Features
+- 🖼️ **Image Upload & Detection** — one-click face landmark detection on your image
+- 🔎 **Zoom & Pan** — mouse wheel zoom + click-drag pan (infinite canvas feel)
+- 🔢 **Adjustable Visuals** — sliders for **point size** and **label font size**
+- 🏷️ **Show/Hide Labels** — toggle numeric indices for all keypoints
+- 🎯 **Selectable Keypoint** — click highlights nearest point with readable label
+- 📚 **Practice Mode** — create/edit/delete **named sets of indices**, persist to **localStorage**, and “show only selected”
+- 🎨 **Mask Overlay System** — upload multiple masks, set **tint**, **opacity**, **blend mode**; **reorder**, **toggle** visibility, or **remove**
+- 🧹 **Session Controls** — remove image / clear masks / clear practice sets
+
+---
+
+## 🧰 Tech Stack
+- **Language:** JavaScript (ES6+), HTML5, CSS3  
+- **ML:** TensorFlow.js + `@tensorflow-models/face-landmarks-detection` (MediaPipe FaceMesh)  
+- **Rendering:** HTML5 Canvas 2D  
+- **Storage:** `localStorage` (practice sets)
+
+---
+
+## 🚀 Getting Started
+### Prerequisites
+A modern browser (Chrome/Edge/Firefox).  
+To avoid any local file restrictions, serve the folder over HTTP:
+
+```bash
+# Option A: Python 3
+python -m http.server 8000
+
+# Option B: Node http-server (if installed)
+npx http-server -p 8000
+
+Then open:
+http://localhost:8000
+(You can also open the HTML file directly; CDNs are used for TFJS and the model, but some browsers restrict local file access, so a local server is recommended.)
+
+📖 Usage
+Upload an image with a clear, front-facing face.
+
+The app detects landmarks and renders them over your image.
+
+Use the sliders to adjust point size and font size.
+
+Toggle Show Labels to see keypoint indices.
+
+Zoom with the mouse wheel; pan by click-dragging inside the canvas.
+
+Click near a landmark to select and highlight it.
+
+Practice Mode
+Toggle Practice Mode (▶ / ▼).
+
+Create a named set (e.g., “Eyes”) with a comma-separated list of indices: 33, 7, 109
+
+Add/Update/Delete sets; they’re saved to localStorage.
+
+Use Show Only Selected to focus on just one set.
+
+Mask Overlays
+Upload one or more masks (PNG recommended).
+
+For each mask you can:
+
+Toggle visibility
+
+Set Tint Color (color picker)
+
+Adjust Opacity (0–1 slider)
+
+Change Blend Mode (multiply, screen, overlay, etc.)
+
+Reorder (↑ / ↓) or Remove (✕)
+
+🧱 Project Structure
+
+index.html      # App UI and controls (this file)
+styles (inline) # Minimal, inline CSS for layout/controls
+<Canvas>        # Main drawing surface
+
+# External (CDN):
+# - @tensorflow/tfjs
+# - @tensorflow-models/face-landmarks-detection (MediaPipe FaceMesh)
+
+🧪 How It Works (Brief)
+Loads TFJS and the FaceMesh detector from CDN.
+
+On image upload, resizes a copy for inference, then maps predicted keypoints back to the original resolution.
+
+Draws the base image, then overlays:
+
+Masks (stacked with chosen blend modes/tints)
+
+Keypoints and labels (respecting zoom/pan)
+
+Selection highlight (if a keypoint is selected)
+
+Practice sets live in localStorage and drive visibility when “Show Only Selected” is enabled.
+
+🧯 Troubleshooting
+“No face detected”: Use a larger, front-facing image with good lighting.
+
+Nothing appears: Ensure the canvas is visible and the image finished loading.
+
+Slow on large images: The app downsamples for inference, but extremely large images can still be heavy.
+
+Local file issues: Serve via a local HTTP server (see Getting Started).
+
+📚 What I Learned
+Using TFJS + MediaPipe FaceMesh in a browser workflow
+
+Mapping detection coordinates between resized inference and display space
+
+Implementing canvas zoom/pan with stable transforms
+
+Designing a practice/study flow for keypoint subsets with persistence
+
+Building a layered mask system (tint, opacity, blend modes, z-order)
+
+🛣️ Future Improvements
+Multi-face support + face selector
+
+Save/Load sessions (image, masks, sets) to a file
+
+Export CSV / JSON of selected keypoints
+
+Screenshot/export annotated image
+
+Keyboard shortcuts for zoom/pan/toggles
+
+Performance pass for very large images
+
+📜 License
+Educational project — free to view and adapt with attribution for non-commercial use.
+Please credit Alanna Matundan if you reuse ideas or UI patterns from this tool.
