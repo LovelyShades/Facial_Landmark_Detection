@@ -89,6 +89,9 @@ Reorder (↑ / ↓) or Remove (✕)
 
 index.html      # App UI and controls (this file)
 styles (inline) # Minimal, inline CSS for layout/controls
+model.jpg       # Sample face input
+mesh_map.jpg    # Custom mask template
+test_mask.jps   # Sample mask input
 <Canvas>        # Main drawing surface
 
 # External (CDN):
