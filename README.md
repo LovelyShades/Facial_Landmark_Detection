@@ -23,6 +23,29 @@ Includes **zoom/pan**, **label toggles**, **point/font size controls**, and a **
 - 🧹 **Session Controls** — remove image / clear masks / clear practice sets
 
 ---
+## 🎬 Demo GIFs
+
+<p align="center">
+  <img src="gifs/debugger_upload.gif" width="320" alt="Upload & Detect"><br>
+  <em>🖼️ Upload an image & detect landmarks</em>
+</p>
+
+<p align="center">
+  <img src="gifs/practice_mode.gif" width="320" alt="Practice Mode"><br>
+  <em>📚 Create & manage keypoint sets with Practice Mode</em>
+</p>
+
+<p align="center">
+  <img src="gifs/show_labels.gif" width="320" alt="Show Labels"><br>
+  <em>🏷️ Toggle numeric labels on keypoints</em>
+</p>
+
+<p align="center">
+  <img src="gifs/size_font.gif" width="320" alt="Adjust Sizes"><br>
+  <em>🔢 Adjust point size & label font size</em>
+</p>
+
+---
 
 ## 🧰 Tech Stack
 - **Language:** JavaScript (ES6+), HTML5, CSS3  
